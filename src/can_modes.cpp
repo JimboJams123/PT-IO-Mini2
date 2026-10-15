@@ -1184,6 +1184,107 @@ static void motecE888BuildTxDiagFrame(uint8_t digitalInMask,
   (void)fwVersion; // Not used in E888 diag frame
 }
 
+// Emtron EIC16M input-expander emulation.
+// Protocol: https://docs.emtronaustralia.com.au/accessories/input-expander/index.html
+// Base ID default 705/0x2C1; transmit-only (no RX side to decode), 8-byte LE frames:
+//   base+0: AN Voltage 1-4, base+1: AN Voltage 5-8 (0.001 V/count, 0.0-5.0 V)
+//   base+4: Frequency 1-4  (0.1 Hz/count)
+// AN Voltage 9-16 (base+2/+3) are intentionally not sent: Mini2 has no more
+// than 8 analog inputs.
+//
+// Mini2 has 8 digital inputs but EIC16M only has 4 Frequency channels, so
+// DI5-8 are emulated as a second Emtron device, the EIC10 (EMtune picker:
+// "73: Emtron EIC10 x1 Device", CAN PID 718-721) - its base ID is
+// `config.eic10BaseId` (default 718). No public EIC10 datasheet exists; per
+// TODO_EMTRON_CAN_MODE.md §3 this assumes the same per-value encoding as
+// EIC16M and only sends the Frequency frame (base+3) since Mini2 has no
+// spare analog channels to fill the EIC10's AV slots - UNCONFIRMED against
+// real hardware, bench-test before trusting this mapping.
+static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
+                                      const uint16_t analogRaw14[8],
+                                      ModeTxFrame &frame0,
+                                      ModeTxFrame &frame1) {
+  frame0.id = txBaseId;
+  frame0.len = 8;
+  memset(frame0.data, 0, sizeof(frame0.data));
+  for (int i = 0; i < 4; i++) {
+    uint16_t mv = scaleAnalog14ToMv5000(analogRaw14[i]);
+    frame0.data[i * 2] = static_cast<uint8_t>(mv & 0xFF);
+    frame0.data[i * 2 + 1] = static_cast<uint8_t>((mv >> 8) & 0xFF);
+  }
+
+  frame1.id = txBaseId + 1U;
+  frame1.len = 8;
+  memset(frame1.data, 0, sizeof(frame1.data));
+  for (int i = 0; i < 4; i++) {
+    uint16_t mv = scaleAnalog14ToMv5000(analogRaw14[i + 4]);
+    frame1.data[i * 2] = static_cast<uint8_t>(mv & 0xFF);
+    frame1.data[i * 2 + 1] = static_cast<uint8_t>((mv >> 8) & 0xFF);
+  }
+}
+
+static uint16_t emtronCalcFreqTenthsHz(uint32_t timerFreqHz,
+                                       uint32_t periodCounts,
+                                       bool hasPeriod) {
+  if (!hasPeriod || timerFreqHz == 0U || periodCounts == 0U) {
+    return 0U;
+  }
+  uint32_t tenthsHz = (timerFreqHz * 10UL + (periodCounts / 2U)) / periodCounts;
+  return clampU16(tenthsHz);
+}
+
+// Outputs have no home in the EIC16M/EIC10 spec either (input-only devices),
+// so output control instead rides on EMtune's "Custom Tx Data Set" feature
+// (4x "User Duty Cycle" params), the same approach PT Motorsport already
+// shipped on earlier Haltech-based boards - confirmed from their public
+// reference firmware and write-up (see TODO_EMTRON_CAN_MODE.md §5):
+// https://www.ptmotorsport.com.au/emtron-can-information-for-use-with-pt-motorsport-io-expanders/
+// One 8-byte frame at rxBaseId (configure to 722/0x2D2 in EMtune), 4x uint16
+// LE, 0-1000 = 0.0-100.0% duty, driving DPO1-4. Mini2 has 8 physical outputs,
+// so a second Custom Tx Data Set at rxBaseId+1 drives DPO5-8. Unlike the
+// reference firmware, this deliberately does NOT decode any safe/active flag
+// bits packed into spare bits of the duty words - the firmware's existing
+// CAN-RX-timeout safe-state mechanism (config.safeMask/activeMask,
+// app-programmable, applied once CAN goes silent) already covers that and
+// stays dormant while Emtron frames are actively arriving, rather than being
+// confounded by a format Emtron itself doesn't define.
+static bool emtronDecodeDutyFrame(const CanMsg &msg,
+                                  uint16_t defaultPwmFreqHz,
+                                  uint8_t channelStart,
+                                  uint16_t outputFreq[8],
+                                  uint8_t outputDuty[8]) {
+  if (msg.data_length < 8) {
+    return false;
+  }
+
+  for (uint8_t i = 0; i < 4U; i++) {
+    uint16_t dutyRaw1000 = static_cast<uint16_t>(msg.data[i * 2U] | (msg.data[i * 2U + 1U] << 8));
+    if (dutyRaw1000 > 1000U) {
+      dutyRaw1000 = 1000U;
+    }
+    uint8_t ch = static_cast<uint8_t>(channelStart + i);
+    outputDuty[ch] = mapDuty1000To255(dutyRaw1000);
+    if (outputFreq[ch] == 0U) {
+      outputFreq[ch] = defaultPwmFreqHz;
+    }
+  }
+  return true;
+}
+
+static bool emtronHandleRx(const CanMsg &msg,
+                           uint16_t rxBaseId,
+                           uint16_t defaultPwmFreqHz,
+                           uint16_t outputFreq[8],
+                           uint8_t outputDuty[8]) {
+  if (msg.id == rxBaseId) {
+    return emtronDecodeDutyFrame(msg, defaultPwmFreqHz, 0U, outputFreq, outputDuty);
+  }
+  if (msg.id == rxBaseId + 1U) {
+    return emtronDecodeDutyFrame(msg, defaultPwmFreqHz, 4U, outputFreq, outputDuty);
+  }
+  return false;
+}
+
 bool canModeHandleRx(uint8_t mode,
                      const CanMsg &msg,
                      uint16_t rxBaseId,
@@ -1257,6 +1358,15 @@ bool canModeHandleRx(uint8_t mode,
       return motecE888HandleRx(msg, defaultPwmFreqHz, outputFreq, outputDuty);
 
     case CAN_MODE_EMTRON:
+      // EIC16M/EIC10 themselves are transmit-only; output duty is decoded from
+      // EMtune's Custom Tx Data Set frame instead (see emtronHandleRx).
+      (void)safeMask;
+      (void)activeMask;
+      (void)inputPullupMask;
+      maskChanged = false;
+      pullupChanged = false;
+      return emtronHandleRx(msg, rxBaseId, defaultPwmFreqHz, outputFreq, outputDuty);
+
     case CAN_MODE_RESERVED_9:
     case CAN_MODE_RESERVED_10:
     case CAN_MODE_RESERVED_11:
@@ -1317,6 +1427,11 @@ void canModeBuildTxAnalogFrames(uint8_t mode,
     frame1.id = 0;
     frame1.len = 0;
     memset(frame1.data, 0, sizeof(frame1.data));
+    return;
+  }
+
+  if (mode == CAN_MODE_EMTRON) {
+    emtronBuildTxAnalogFrames(txBaseId, analogRaw14, frame0, frame1);
     return;
   }
 
@@ -1401,6 +1516,14 @@ void canModeBuildTxStateFrame(uint8_t mode,
   if (mode == CAN_MODE_MOTEC_E888) {
     motecE888TxState.digitalInMask = digitalInMask;
     motecE888BuildTxDiagFrame(digitalInMask, fwVersion, frame);
+    return;
+  }
+
+  if (mode == CAN_MODE_EMTRON) {
+    // No equivalent frame in the EIC16M/EIC10 spec; don't add non-spec bus traffic.
+    frame.id = 0;
+    frame.len = 0;
+    memset(frame.data, 0, sizeof(frame.data));
     return;
   }
 
@@ -1520,6 +1643,51 @@ void canModeBuildTxDiPairFrame(uint8_t mode,
     frame.id = 0;
     frame.len = 0;
     memset(frame.data, 0, sizeof(frame.data));
+    return;
+  }
+
+  if (mode == CAN_MODE_EMTRON) {
+    // This function is called once per DI pair, 4 times per TX cycle:
+    // (DI1,DI2), (DI3,DI4), (DI5,DI6), (DI7,DI8).
+    //   calls 0-1 (DI1-4) -> accumulate, emit EIC16M Frequency 1-4 at `baseId`
+    //     (txBaseId+4) on call 1.
+    //   calls 2-3 (DI5-8) -> accumulate, emit a second Frequency frame for the
+    //     EIC10 "second device" at `baseId` (eic10BaseId+3, see main.cpp call
+    //     site) on call 3 - but only if DI5-8 actually have real data, so
+    //     DTM2-style hardware (no DI5-8) never emits this extra frame.
+    static uint8_t emtronCallIndex = 0;
+    static uint16_t emtronFreqTenths[4] = {0, 0, 0, 0};
+    static bool emtronSecondaryHasData = false;
+
+    uint8_t pairIndex = static_cast<uint8_t>(emtronCallIndex % 2U);
+    uint16_t freq0 = emtronCalcFreqTenthsHz(timerFreq0, period0, hasPeriod0);
+    uint16_t freq1 = emtronCalcFreqTenthsHz(timerFreq1, period1, hasPeriod1);
+    emtronFreqTenths[pairIndex * 2U] = freq0;
+    emtronFreqTenths[pairIndex * 2U + 1U] = freq1;
+    if (emtronCallIndex >= 2U && (hasPeriod0 || hasPeriod1)) {
+      emtronSecondaryHasData = true;
+    }
+
+    bool emit = (emtronCallIndex == 1U) ||
+                (emtronCallIndex == 3U && emtronSecondaryHasData);
+    if (emit) {
+      frame.id = baseId;
+      frame.len = 8;
+      memset(frame.data, 0, sizeof(frame.data));
+      for (uint8_t i = 0; i < 4U; i++) {
+        frame.data[i * 2U] = static_cast<uint8_t>(emtronFreqTenths[i] & 0xFFU);
+        frame.data[i * 2U + 1U] = static_cast<uint8_t>((emtronFreqTenths[i] >> 8) & 0xFFU);
+      }
+    } else {
+      frame.id = 0;
+      frame.len = 0;
+      memset(frame.data, 0, sizeof(frame.data));
+    }
+
+    emtronCallIndex = static_cast<uint8_t>((emtronCallIndex + 1U) % 4U);
+    if (emtronCallIndex == 0U) {
+      emtronSecondaryHasData = false;
+    }
     return;
   }
 

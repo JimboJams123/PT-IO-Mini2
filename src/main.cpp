@@ -151,10 +151,14 @@ const uint16_t DEFAULT_CAN_SPEED_KBPS = 1000;
 const uint16_t DEFAULT_TX_RATE_HZ = 10;
 const uint16_t DEFAULT_TX_BASE_ID = 0x700;
 const uint16_t DEFAULT_RX_BASE_ID = 0x640;
+// Emtron mode only: base ID for the "EIC10" second emulated device that
+// carries DI5-8 frequency data (EMtune picker: "73: Emtron EIC10 x1 Device",
+// CAN PID 718-721) - see TODO_EMTRON_CAN_MODE.md §3.
+const uint16_t DEFAULT_EIC10_BASE_ID = 718;
 const uint16_t DEFAULT_RX_TIMEOUT_MS = 2000;
 const uint16_t DEFAULT_PWM_FREQ_HZ = 300;
 const uint8_t DEFAULT_DI_DEBOUNCE_MS = 20;
-const uint8_t FW_VERSION = 0x08;
+const uint8_t FW_VERSION = 0x09;
 
 // Additional hardware polarity stage (e.g. external MOSFET inverter).
 // Bit=1 means invert the post-activeMask duty before writing to the pin.
@@ -167,7 +171,7 @@ const uint8_t DI_ACTIVE_LOW_MASK = 0xFF;
 
 // Config persistence
 const uint16_t CONFIG_MAGIC = 0x5049; // "PI"
-const uint8_t CONFIG_VERSION = 2;
+const uint8_t CONFIG_VERSION = 3;
 
 struct Config {
   uint16_t magic;
@@ -175,6 +179,7 @@ struct Config {
   uint16_t canSpeedKbps;
   uint16_t txBaseId;
   uint16_t rxBaseId;
+  uint16_t eic10BaseId;
   uint16_t txRateHz;
   uint16_t rxTimeoutMs;
   uint16_t outFreqHz[4];
@@ -504,6 +509,7 @@ void setDefaults(Config &cfg) {
   cfg.canSpeedKbps = DEFAULT_CAN_SPEED_KBPS;
   cfg.txBaseId = DEFAULT_TX_BASE_ID;
   cfg.rxBaseId = DEFAULT_RX_BASE_ID;
+  cfg.eic10BaseId = DEFAULT_EIC10_BASE_ID;
   cfg.txRateHz = DEFAULT_TX_RATE_HZ;
   cfg.rxTimeoutMs = DEFAULT_RX_TIMEOUT_MS;
   cfg.outFreqHz[0] = DEFAULT_PWM_FREQ_HZ;
@@ -1157,10 +1163,20 @@ static void sendTxFrames() {
 
   // ECU Master CANSWB only sends the 3 analog/state frames above; skip DI and status frames
   if (config.canMode != CAN_MODE_ECUMASTER_CANSWB_V3) {
-    packFreqDuty(0, config.txBaseId + 3);
-    packFreqDuty(2, config.txBaseId + 4);
-    packFreqDuty(4, config.txBaseId + 5);
-    packFreqDuty(6, config.txBaseId + 6);
+    if (config.canMode == CAN_MODE_EMTRON) {
+      // DI1-4 -> EIC16M Frequency 1-4 at txBaseId+4 (standard spec slot).
+      // DI5-8 -> EIC10 "second device" Frequency frame at eic10BaseId+3,
+      // only emitted by canModeBuildTxDiPairFrame if DI5-8 have real data.
+      packFreqDuty(0, config.txBaseId + 3);
+      packFreqDuty(2, config.txBaseId + 4);
+      packFreqDuty(4, config.eic10BaseId + 2);
+      packFreqDuty(6, config.eic10BaseId + 3);
+    } else {
+      packFreqDuty(0, config.txBaseId + 3);
+      packFreqDuty(2, config.txBaseId + 4);
+      packFreqDuty(4, config.txBaseId + 5);
+      packFreqDuty(6, config.txBaseId + 6);
+    }
 
     Mode0Status modeStatus;
     modeStatus.canInitOk = canInitOk;
@@ -1299,6 +1315,7 @@ static void printHelp() {
   Serial.println("  CANSPEED <kbps>        - Set CAN speed (125/250/500/1000)");
   Serial.println("  TXBASE <hex>           - Set CAN TX base ID");
   Serial.println("  RXBASE <hex>           - Set CAN RX base ID");
+  Serial.println("  EIC10BASE <hex>        - Set Emtron EIC10 base ID (mode 8 only)");
   Serial.println("  TXRATE <hz>            - Set CAN TX rate in Hz");
   Serial.println("  RXTIMEOUT <ms>         - Set RX timeout in ms");
   Serial.println("  CANMODE <0-15>          - Set CAN mode");
@@ -1464,6 +1481,8 @@ static void printConfig() {
   Serial.println(config.txBaseId, HEX);
   Serial.print("RX Base ID: 0x");
   Serial.println(config.rxBaseId, HEX);
+  Serial.print("EIC10 Base ID: 0x");
+  Serial.println(config.eic10BaseId, HEX);
   Serial.print("TX Rate: ");
   Serial.print(config.txRateHz);
   Serial.println(" Hz");
@@ -1554,7 +1573,7 @@ static void handleSerial() {
         diDebouncedState, diTimerFreq, diPeriodCounts, diHighCounts, diHasPeriod, diHasHigh, NUM_DIGITAL_IN, DI_ACTIVE_LOW_MASK,
         outputDuty, outputFreq, config.safeMask, config.activeMask, NUM_DIGITAL_OUT,
         canInitOk, outputsInSafeState, canRxCount, canTxCount, canTxFail, config.canMode, lastCanRxMs,
-        config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.txRateHz, config.rxTimeoutMs,
+        config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.eic10BaseId, config.txRateHz, config.rxTimeoutMs,
         config.inputPullupMask, getDiDebounceMs(), FW_VERSION, adcScanFailCount, millis()
       };
       sendJsonConfig(state);
@@ -1575,7 +1594,7 @@ static void handleSerial() {
         diDebouncedState, diTimerFreq, diPeriodCounts, diHighCounts, diHasPeriod, diHasHigh, NUM_DIGITAL_IN, DI_ACTIVE_LOW_MASK,
         outputDuty, outputFreq, config.safeMask, config.activeMask, NUM_DIGITAL_OUT,
         canInitOk, outputsInSafeState, canRxCount, canTxCount, canTxFail, config.canMode, lastCanRxMs,
-        config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.txRateHz, config.rxTimeoutMs,
+        config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.eic10BaseId, config.txRateHz, config.rxTimeoutMs,
         config.inputPullupMask, getDiDebounceMs(), FW_VERSION, adcScanFailCount, millis()
       };
       sendJsonTelemetry(state);
@@ -1752,6 +1771,19 @@ static void handleSerial() {
       return;
     }
     config.rxBaseId = id;
+    saveConfig();
+    Serial.println("OK");
+    return;
+  }
+
+  if (cmd.startsWith("EIC10BASE")) {
+    String arg = getArg(1);
+    uint16_t id = static_cast<uint16_t>(strtol(arg.c_str(), nullptr, 0));
+    if (id > 0x7FFU) {
+      Serial.println("ERR: CAN ID must be 0x000-0x7FF (11-bit)");
+      return;
+    }
+    config.eic10BaseId = id;
     saveConfig();
     Serial.println("OK");
     return;
@@ -2201,7 +2233,7 @@ void loop() {
         diDebouncedState, diTimerFreq, diPeriodCounts, diHighCounts, diHasPeriod, diHasHigh, NUM_DIGITAL_IN, DI_ACTIVE_LOW_MASK,
         outputDuty, outputFreq, config.safeMask, config.activeMask, NUM_DIGITAL_OUT,
         canInitOk, outputsInSafeState, canRxCount, canTxCount, canTxFail, config.canMode, lastCanRxMs,
-        config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.txRateHz, config.rxTimeoutMs,
+        config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.eic10BaseId, config.txRateHz, config.rxTimeoutMs,
         config.inputPullupMask, getDiDebounceMs(), FW_VERSION, adcScanFailCount, now
       };
       sendJsonTelemetry(state);

@@ -8,6 +8,7 @@ extern struct Config {
   uint16_t canSpeedKbps;
   uint16_t txBaseId;
   uint16_t rxBaseId;
+  uint16_t eic10BaseId;
   uint16_t txRateHz;
   uint16_t rxTimeoutMs;
   uint16_t outFreqHz[4];
@@ -165,6 +166,7 @@ void sendJsonConfig(const DeviceState& state) {
   doc["canSpeed"] = state.canSpeedKbps;
   doc["txBaseId"] = state.txBaseId;
   doc["rxBaseId"] = state.rxBaseId;
+  doc["eic10BaseId"] = state.eic10BaseId;
   doc["txRate"] = state.txRateHz;
   doc["rxTimeout"] = state.rxTimeoutMs;
   doc["canMode"] = state.canMode;
@@ -393,6 +395,15 @@ JsonCmdResult handleJsonCommand(const String& jsonLine,
         return {false, "CAN ID must be 0x000-0x7FF"};
       }
       config.rxBaseId = id;
+      changed = true;
+    }
+
+    if (doc.containsKey("eic10BaseId")) {
+      uint16_t id = doc["eic10BaseId"];
+      if (id > 0x7FF) {
+        return {false, "CAN ID must be 0x000-0x7FF"};
+      }
+      config.eic10BaseId = id;
       changed = true;
     }
     

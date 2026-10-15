@@ -68,6 +68,7 @@ struct DeviceState {
   uint16_t canSpeedKbps;
   uint16_t txBaseId;
   uint16_t rxBaseId;
+  uint16_t eic10BaseId;
   uint16_t txRateHz;
   uint16_t rxTimeoutMs;
   uint8_t inputPullupMask;
