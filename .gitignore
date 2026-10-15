@@ -3,3 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Local-only reference clone of the companion app repo (not part of this repo's history)
+PT-IO-Mini2-APP/
