@@ -1202,7 +1202,10 @@ static void motecE888BuildTxDiagFrame(uint8_t digitalInMask,
 
 // Emtron EIC16M input-expander emulation.
 // Protocol: https://docs.emtronaustralia.com.au/accessories/input-expander/index.html
-// Base ID default 705/0x2C1; transmit-only (no RX side to decode), 8-byte LE frames:
+// Fixed base ID 705/0x2C1 (EIC16M factory default) - like Haltech/Motec/ECU Master,
+// this mode owns a hardcoded address range and ignores config.txBaseId entirely, since
+// the connected ECU expects data at its own well-known IDs, not a user-configurable one.
+// Transmit-only (no RX side to decode), 8-byte LE frames:
 //   base+0: AN Voltage 1-4, base+1: AN Voltage 5-8 (0.001 V/count, 0.0-5.0 V)
 //   base+2: AN Voltage 9-12 (0.001 V/count) - DTM2's DPO1-4 output voltage sense
 //           (0-30V); sent as literal millivolts, same encoding as 1-8. Mini2 has
@@ -1210,6 +1213,7 @@ static void motecE888BuildTxDiagFrame(uint8_t digitalInMask,
 //   base+4: Frequency 1-4  (0.1 Hz/count)
 // AN Voltage 13-16 (base+3) are intentionally not sent: no board in this family
 // has a 13th-16th analog input.
+static constexpr uint32_t EMTRON_BASE_ID = 0x2C1U;
 // Outputs have no home in the EIC16M/EIC10 spec either (input-only devices),
 // so output control instead rides on EMtune's "Custom Tx Data Set" feature
 // (4x "User Duty Cycle" params), the same approach PT Motorsport already
@@ -1272,7 +1276,8 @@ static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
                                       const uint16_t analogRaw14[8],
                                       ModeTxFrame &frame0,
                                       ModeTxFrame &frame1) {
-  frame0.id = txBaseId;
+  (void)txBaseId;
+  frame0.id = EMTRON_BASE_ID;
   frame0.len = 8;
   memset(frame0.data, 0, sizeof(frame0.data));
   for (int i = 0; i < 4; i++) {
@@ -1281,7 +1286,7 @@ static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
     frame0.data[i * 2 + 1] = static_cast<uint8_t>((mv >> 8) & 0xFF);
   }
 
-  frame1.id = txBaseId + 1U;
+  frame1.id = EMTRON_BASE_ID + 1U;
   frame1.len = 8;
   memset(frame1.data, 0, sizeof(frame1.data));
   for (int i = 0; i < 4; i++) {
@@ -1294,7 +1299,8 @@ static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
 void emtronBuildTxOutputVoltageFrame(uint16_t txBaseId,
                                      const uint16_t outputVoltageMv[4],
                                      ModeTxFrame &frame) {
-  frame.id = txBaseId + 2U;
+  (void)txBaseId;
+  frame.id = EMTRON_BASE_ID + 2U;
   frame.len = 8;
   memset(frame.data, 0, sizeof(frame.data));
   for (uint8_t i = 0; i < 4U; i++) {
@@ -1694,7 +1700,7 @@ void canModeBuildTxDiPairFrame(uint8_t mode,
       emtronFreqTenths[2] = emtronCalcFreqTenthsHz(timerFreq0, period0, hasPeriod0);
       emtronFreqTenths[3] = emtronCalcFreqTenthsHz(timerFreq1, period1, hasPeriod1);
 
-      frame.id = baseId;
+      frame.id = EMTRON_BASE_ID + 4U;
       frame.len = 8;
       memset(frame.data, 0, sizeof(frame.data));
       for (uint8_t i = 0; i < 4U; i++) {
@@ -1772,6 +1778,14 @@ void canModeBuildTxStatusFrame(uint8_t mode,
 
   if (mode == CAN_MODE_PT_DEFAULT1) {
     mode0BuildTxStatusFrame(txBaseId, status, frame);
+    return;
+  }
+
+  if (mode == CAN_MODE_EMTRON) {
+    // No equivalent frame in the EIC16M spec; don't add non-spec bus traffic.
+    frame.id = 0;
+    frame.len = 0;
+    memset(frame.data, 0, sizeof(frame.data));
     return;
   }
   modeStubBuildTxStatusFrame(txBaseId, status, frame);
