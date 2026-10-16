@@ -1248,18 +1248,24 @@ static uint16_t emtronCalcFreqTenthsHz(uint32_t timerFreqHz,
 // https://www.ptmotorsport.com.au/emtron-can-information-for-use-with-pt-motorsport-io-expanders/
 // One 8-byte frame at rxBaseId (configure to 722/0x2D2 in EMtune), 4x uint16
 // LE, 0-1000 = 0.0-100.0% duty, driving DPO1-4. Mini2 has 8 physical outputs,
-// so a second Custom Tx Data Set at rxBaseId+1 drives DPO5-8. Unlike the
-// reference firmware, this deliberately does NOT decode any safe/active flag
-// bits packed into spare bits of the duty words - the firmware's existing
-// CAN-RX-timeout safe-state mechanism (config.safeMask/activeMask,
-// app-programmable, applied once CAN goes silent) already covers that and
-// stays dormant while Emtron frames are actively arriving, rather than being
-// confounded by a format Emtron itself doesn't define.
+// so a second Custom Tx Data Set at rxBaseId+1 drives DPO5-8. The duty words
+// carry no frequency, so PWM frequency instead always comes from the
+// app-configured, persisted config.outFreqHz (set it once in the app, then
+// just vary duty from the ECU) - covers all 8 outputs since they already
+// share PWM timers in pairs there. Unlike the reference firmware, this
+// deliberately does NOT decode any safe/active flag bits packed into spare
+// bits of the duty words - the firmware's existing CAN-RX-timeout safe-state
+// mechanism (config.safeMask/activeMask, app-programmable, applied once CAN
+// goes silent) already covers that and stays dormant while Emtron frames are
+// actively arriving, rather than being confounded by a format Emtron itself
+// doesn't define.
 static bool emtronDecodeDutyFrame(const CanMsg &msg,
+                                  const uint16_t configOutFreqHz[4],
                                   uint16_t defaultPwmFreqHz,
                                   uint8_t channelStart,
                                   uint16_t outputFreq[8],
                                   uint8_t outputDuty[8]) {
+  (void)defaultPwmFreqHz; // superseded by configOutFreqHz (see below)
   if (msg.data_length < 8) {
     return false;
   }
@@ -1271,23 +1277,29 @@ static bool emtronDecodeDutyFrame(const CanMsg &msg,
     }
     uint8_t ch = static_cast<uint8_t>(channelStart + i);
     outputDuty[ch] = mapDuty1000To255(dutyRaw1000);
-    if (outputFreq[ch] == 0U) {
-      outputFreq[ch] = defaultPwmFreqHz;
-    }
+    // The Custom Tx Data Set has no frequency field at all, so always drive
+    // from the app-configured, persisted frequency instead of a hardcoded
+    // default - set it once in the app, then only duty is live-controlled
+    // from the ECU. Mini2's 8 physical outputs share PWM timers in pairs
+    // (ch 0&1, 2&3, 4&5, 6&7 all read config.outFreqHz[ch/2] - see the
+    // resetDefaults pairing in main.cpp), which also means all 8 outputs -
+    // not just DPO1-4 - already have a persisted slot to read from.
+    outputFreq[ch] = configOutFreqHz[ch / 2U];
   }
   return true;
 }
 
 static bool emtronHandleRx(const CanMsg &msg,
                            uint16_t rxBaseId,
+                           const uint16_t configOutFreqHz[4],
                            uint16_t defaultPwmFreqHz,
                            uint16_t outputFreq[8],
                            uint8_t outputDuty[8]) {
   if (msg.id == rxBaseId) {
-    return emtronDecodeDutyFrame(msg, defaultPwmFreqHz, 0U, outputFreq, outputDuty);
+    return emtronDecodeDutyFrame(msg, configOutFreqHz, defaultPwmFreqHz, 0U, outputFreq, outputDuty);
   }
   if (msg.id == rxBaseId + 1U) {
-    return emtronDecodeDutyFrame(msg, defaultPwmFreqHz, 4U, outputFreq, outputDuty);
+    return emtronDecodeDutyFrame(msg, configOutFreqHz, defaultPwmFreqHz, 4U, outputFreq, outputDuty);
   }
   return false;
 }
@@ -1296,6 +1308,7 @@ bool canModeHandleRx(uint8_t mode,
                      const CanMsg &msg,
                      uint16_t rxBaseId,
                      uint16_t defaultPwmFreqHz,
+                     const uint16_t configOutFreqHz[4],
                      uint16_t outputFreq[8],
                      uint8_t outputDuty[8],
                      uint8_t &safeMask,
@@ -1372,7 +1385,7 @@ bool canModeHandleRx(uint8_t mode,
       (void)inputPullupMask;
       maskChanged = false;
       pullupChanged = false;
-      return emtronHandleRx(msg, rxBaseId, defaultPwmFreqHz, outputFreq, outputDuty);
+      return emtronHandleRx(msg, rxBaseId, configOutFreqHz, defaultPwmFreqHz, outputFreq, outputDuty);
 
     case CAN_MODE_RESERVED_9:
     case CAN_MODE_RESERVED_10:
