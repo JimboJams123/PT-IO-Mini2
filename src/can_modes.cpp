@@ -1186,7 +1186,10 @@ static void motecE888BuildTxDiagFrame(uint8_t digitalInMask,
 
 // Emtron EIC16M input-expander emulation.
 // Protocol: https://docs.emtronaustralia.com.au/accessories/input-expander/index.html
-// Base ID default 705/0x2C1; transmit-only (no RX side to decode), 8-byte LE frames:
+// Fixed base ID 705/0x2C1 (EIC16M factory default) - like Haltech/Motec/ECU Master,
+// this mode owns a hardcoded address range and ignores config.txBaseId entirely, since
+// the connected ECU expects data at its own well-known IDs, not a user-configurable one.
+// Transmit-only (no RX side to decode), 8-byte LE frames:
 //   base+0: AN Voltage 1-4, base+1: AN Voltage 5-8 (0.001 V/count, 0.0-5.0 V)
 //   base+4: Frequency 1-4  (0.1 Hz/count)
 // AN Voltage 9-16 (base+2/+3) are intentionally not sent: Mini2 has no more
@@ -1194,17 +1197,21 @@ static void motecE888BuildTxDiagFrame(uint8_t digitalInMask,
 //
 // Mini2 has 8 digital inputs but EIC16M only has 4 Frequency channels, so
 // DI5-8 are emulated as a second Emtron device, the EIC10 (EMtune picker:
-// "73: Emtron EIC10 x1 Device", CAN PID 718-721) - its base ID is
-// `config.eic10BaseId` (default 718). No public EIC10 datasheet exists; per
-// TODO_EMTRON_CAN_MODE.md §3 this assumes the same per-value encoding as
-// EIC16M and only sends the Frequency frame (base+3) since Mini2 has no
-// spare analog channels to fill the EIC10's AV slots - UNCONFIRMED against
-// real hardware, bench-test before trusting this mapping.
+// "73: Emtron EIC10 x1 Device", CAN PID 718-721) - its base ID stays
+// user-configurable via `config.eic10BaseId` (default 718), since unlike the
+// EIC16M there's no single factory address for a chosen "second device"
+// slot. No public EIC10 datasheet exists; per TODO_EMTRON_CAN_MODE.md §3
+// this assumes the same per-value encoding as EIC16M and only sends the
+// Frequency frame (base+3) since Mini2 has no spare analog channels to fill
+// the EIC10's AV slots - UNCONFIRMED against real hardware, bench-test
+// before trusting this mapping.
+static constexpr uint32_t EMTRON_BASE_ID = 0x2C1U;
 static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
                                       const uint16_t analogRaw14[8],
                                       ModeTxFrame &frame0,
                                       ModeTxFrame &frame1) {
-  frame0.id = txBaseId;
+  (void)txBaseId;
+  frame0.id = EMTRON_BASE_ID;
   frame0.len = 8;
   memset(frame0.data, 0, sizeof(frame0.data));
   for (int i = 0; i < 4; i++) {
@@ -1213,7 +1220,7 @@ static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
     frame0.data[i * 2 + 1] = static_cast<uint8_t>((mv >> 8) & 0xFF);
   }
 
-  frame1.id = txBaseId + 1U;
+  frame1.id = EMTRON_BASE_ID + 1U;
   frame1.len = 8;
   memset(frame1.data, 0, sizeof(frame1.data));
   for (int i = 0; i < 4; i++) {
@@ -1668,10 +1675,15 @@ void canModeBuildTxDiPairFrame(uint8_t mode,
       emtronSecondaryHasData = true;
     }
 
-    bool emit = (emtronCallIndex == 1U) ||
+    bool isPrimaryCall = (emtronCallIndex == 1U);
+    bool emit = isPrimaryCall ||
                 (emtronCallIndex == 3U && emtronSecondaryHasData);
     if (emit) {
-      frame.id = baseId;
+      // Primary (DI1-4) frame always goes to the fixed EIC16M address;
+      // secondary (DI5-8) frame keeps using the configurable eic10BaseId
+      // passed in via `baseId`, since that "second device" slot has no
+      // single factory address.
+      frame.id = isPrimaryCall ? (EMTRON_BASE_ID + 4U) : baseId;
       frame.len = 8;
       memset(frame.data, 0, sizeof(frame.data));
       for (uint8_t i = 0; i < 4U; i++) {
@@ -1752,6 +1764,14 @@ void canModeBuildTxStatusFrame(uint8_t mode,
 
   if (mode == CAN_MODE_PT_DEFAULT1) {
     mode0BuildTxStatusFrame(txBaseId, status, frame);
+    return;
+  }
+
+  if (mode == CAN_MODE_EMTRON) {
+    // No equivalent frame in the EIC16M/EIC10 spec; don't add non-spec bus traffic.
+    frame.id = 0;
+    frame.len = 0;
+    memset(frame.data, 0, sizeof(frame.data));
     return;
   }
   modeStubBuildTxStatusFrame(txBaseId, status, frame);

@@ -1164,9 +1164,12 @@ static void sendTxFrames() {
   // ECU Master CANSWB only sends the 3 analog/state frames above; skip DI and status frames
   if (config.canMode != CAN_MODE_ECUMASTER_CANSWB_V3) {
     if (config.canMode == CAN_MODE_EMTRON) {
-      // DI1-4 -> EIC16M Frequency 1-4 at txBaseId+4 (standard spec slot).
-      // DI5-8 -> EIC10 "second device" Frequency frame at eic10BaseId+3,
-      // only emitted by canModeBuildTxDiPairFrame if DI5-8 have real data.
+      // DI1-4 -> EIC16M Frequency 1-4. canModeBuildTxDiPairFrame ignores the
+      // txBaseId+4 passed here and always uses the fixed EIC16M address
+      // (705/0x2C1 + 4) - see EMTRON_BASE_ID in can_modes.cpp.
+      // DI5-8 -> EIC10 "second device" Frequency frame at eic10BaseId+3
+      // (still configurable, no fixed address for that device), only
+      // emitted by canModeBuildTxDiPairFrame if DI5-8 have real data.
       packFreqDuty(0, config.txBaseId + 3);
       packFreqDuty(2, config.txBaseId + 4);
       packFreqDuty(4, config.eic10BaseId + 2);
