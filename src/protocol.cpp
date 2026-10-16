@@ -26,6 +26,7 @@ extern void applyInputPullups();
 extern bool setCanBitrate(uint16_t kbps);
 extern uint8_t getDiDebounceMs();
 extern void setDiDebounceMs(uint8_t ms);
+extern void setAnalogPullupChannelBit(uint8_t ch, bool enabled);
 
 // Send JSON hello message on connect
 void sendJsonHello(uint8_t fwVersion, uint8_t canMode) {
@@ -34,6 +35,7 @@ void sendJsonHello(uint8_t fwVersion, uint8_t canMode) {
   doc["type"] = "hello";
   doc["version"] = PROTOCOL_VERSION;
   doc["fw"] = fwVersion;
+  doc["board"] = "PT-IO-DTM2";
   doc["canMode"] = canMode;
   doc["canModeName"] = canModeName(canMode);
   
@@ -43,10 +45,13 @@ void sendJsonHello(uint8_t fwVersion, uint8_t canMode) {
   capabilities.add("pwm");
   capabilities.add("can");
   capabilities.add("config");
+  capabilities.add("outputVoltage");
+  capabilities.add("analogPullup");
   
   doc["analogChannels"] = 8;
   doc["digitalIn"] = 4;
   doc["digitalOut"] = 4;
+  doc["outputVoltageChannels"] = 4;
   
   serializeJson(doc, Serial);
   Serial.println();
@@ -142,6 +147,13 @@ void sendJsonTelemetry(const DeviceState& state) {
     out["activeHigh"] = activeHigh;
   }
   
+  // Output voltage sense (DTM2 ADS1115, DPO1-4, millivolts; zeros if sensor not ready)
+  JsonArray outputVoltage = doc.createNestedArray("outputVoltage");
+  for (uint8_t i = 0; i < 4; i++) {
+    outputVoltage.add(state.outputVoltageReady ? state.outputVoltageMv[i] : 0);
+  }
+  doc["outputVoltageReady"] = state.outputVoltageReady;
+  
   // CAN status
   JsonObject can = doc.createNestedObject("can");
   can["init"] = state.canInitOk;
@@ -171,6 +183,7 @@ void sendJsonConfig(const DeviceState& state) {
   doc["safeMask"] = state.safeMask;
   doc["activeMask"] = state.activeMask;
   doc["inputPullupMask"] = state.inputPullupMask;
+  doc["analogPullupMask"] = state.analogPullupMask;
   doc["diDebounceMs"] = state.diDebounceMs;
   
   // Output frequencies (per pair)
@@ -330,6 +343,21 @@ JsonCmdResult handleJsonCommand(const String& jsonLine,
     config.inputPullupMask = inputPullupMask;
     configChanged = true;
     pullupChanged = true;
+    
+    return {true, ""};
+  }
+  
+  // Set analog input pullup (external 1k switch on AV1-4, DTM2 only)
+  if (strcmp(cmd, "setAnalogPullup") == 0) {
+    uint8_t ch = doc["ch"] | 0;
+    bool enabled = doc["enabled"] | false;
+    
+    if (ch < 1 || ch > 4) {
+      return {false, "Channel must be 1-4"};
+    }
+    
+    setAnalogPullupChannelBit(ch, enabled);
+    configChanged = true;
     
     return {true, ""};
   }

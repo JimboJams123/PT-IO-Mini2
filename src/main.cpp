@@ -456,6 +456,22 @@ static void applyAuxSwitchStates() {
   writeGpioOutput(CAN_TERM_SWITCH_PIN, getCanTerminationEnabled());
 }
 
+// Analog input (AV1-4) external 1k pullup switch state, exposed for JSON protocol use.
+uint8_t getAnalogPullupMask() {
+  return static_cast<uint8_t>(getAuxSwitchMask() & ((1U << NUM_ANALOG_PULLUP_SWITCHES) - 1U));
+}
+
+void setAnalogPullupChannelBit(uint8_t ch, bool enabled) {
+  if (ch < 1 || ch > NUM_ANALOG_PULLUP_SWITCHES) {
+    return;
+  }
+  uint8_t mask = getAuxSwitchMask();
+  uint8_t bit = static_cast<uint8_t>(1U << (ch - 1));
+  mask = enabled ? static_cast<uint8_t>(mask | bit) : static_cast<uint8_t>(mask & ~bit);
+  setAuxSwitchMask(mask);
+  applyAuxSwitchStates();
+}
+
 static bool adsWriteRegister(uint8_t reg, uint16_t value) {
   Wire.beginTransmission(OUTPUT_SENSE_I2C_ADDRESS);
   Wire.write(reg);
@@ -541,6 +557,24 @@ static bool readOutputSenseVoltages(float outVoltages[OUTPUT_SENSE_COUNT], int16
     }
   }
   return allOk;
+}
+
+// Snapshot DPO1-4 voltage sense as whole millivolts, for JSON telemetry (separate from the
+// CAN TX path's own scaling in sendTxFrames()).
+static void snapshotOutputVoltageMv(uint16_t outMv[OUTPUT_SENSE_COUNT], bool &ready) {
+  float voltages[OUTPUT_SENSE_COUNT];
+  int16_t raw[OUTPUT_SENSE_COUNT];
+  ready = readOutputSenseVoltages(voltages, raw);
+  for (int i = 0; i < OUTPUT_SENSE_COUNT; i++) {
+    float millivolts = voltages[i] * 1000.0f;
+    if (millivolts <= 0.0f) {
+      outMv[i] = 0U;
+    } else if (millivolts >= 65535.0f) {
+      outMv[i] = 65535U;
+    } else {
+      outMv[i] = static_cast<uint16_t>(millivolts + 0.5f);
+    }
+  }
 }
 
 static void printOutputSenseVoltages() {
@@ -1743,13 +1777,17 @@ static void handleSerial() {
     if (result.errorMsg == "getConfig") {
       // Build device state and send config
       uint8_t readBuf = (adcActiveBuf == 0) ? 1 : 0;
+      uint16_t outputVoltageMv[OUTPUT_SENSE_COUNT];
+      bool outputVoltageReady = false;
+      snapshotOutputVoltageMv(outputVoltageMv, outputVoltageReady);
       DeviceState state = {
         adcBuf[readBuf], NUM_ANALOG,
         diDebouncedState, diTimerFreq, diPeriodCounts, diHighCounts, diHasPeriod, diHasHigh, NUM_DIGITAL_IN, DI_ACTIVE_LOW_MASK,
         outputDuty, outputFreq, config.safeMask, config.activeMask, NUM_DIGITAL_OUT,
         canInitOk, outputsInSafeState, canRxCount, canTxCount, canTxFail, config.canMode, lastCanRxMs,
         config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.txRateHz, config.rxTimeoutMs,
-        config.inputPullupMask, getDiDebounceMs(), FW_VERSION, adcScanFailCount, millis()
+        config.inputPullupMask, getAnalogPullupMask(), getDiDebounceMs(), FW_VERSION,
+        outputVoltageMv, outputVoltageReady, adcScanFailCount, millis()
       };
       sendJsonConfig(state);
       return;
@@ -1764,13 +1802,17 @@ static void handleSerial() {
     if (result.errorMsg == "getStatus") {
       // Build and send telemetry
       uint8_t readBuf = (adcActiveBuf == 0) ? 1 : 0;
+      uint16_t outputVoltageMv[OUTPUT_SENSE_COUNT];
+      bool outputVoltageReady = false;
+      snapshotOutputVoltageMv(outputVoltageMv, outputVoltageReady);
       DeviceState state = {
         adcBuf[readBuf], NUM_ANALOG,
         diDebouncedState, diTimerFreq, diPeriodCounts, diHighCounts, diHasPeriod, diHasHigh, NUM_DIGITAL_IN, DI_ACTIVE_LOW_MASK,
         outputDuty, outputFreq, config.safeMask, config.activeMask, NUM_DIGITAL_OUT,
         canInitOk, outputsInSafeState, canRxCount, canTxCount, canTxFail, config.canMode, lastCanRxMs,
         config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.txRateHz, config.rxTimeoutMs,
-        config.inputPullupMask, getDiDebounceMs(), FW_VERSION, adcScanFailCount, millis()
+        config.inputPullupMask, getAnalogPullupMask(), getDiDebounceMs(), FW_VERSION,
+        outputVoltageMv, outputVoltageReady, adcScanFailCount, millis()
       };
       sendJsonTelemetry(state);
       return;
@@ -2428,13 +2470,17 @@ void loop() {
     if (telemetrySub.format == TELEMETRY_FORMAT_JSON) {
       // Send JSON telemetry
       uint8_t readBuf = (adcActiveBuf == 0) ? 1 : 0;
+      uint16_t outputVoltageMv[OUTPUT_SENSE_COUNT];
+      bool outputVoltageReady = false;
+      snapshotOutputVoltageMv(outputVoltageMv, outputVoltageReady);
       DeviceState state = {
         adcBuf[readBuf], NUM_ANALOG,
         diDebouncedState, diTimerFreq, diPeriodCounts, diHighCounts, diHasPeriod, diHasHigh, NUM_DIGITAL_IN, DI_ACTIVE_LOW_MASK,
         outputDuty, outputFreq, config.safeMask, config.activeMask, NUM_DIGITAL_OUT,
         canInitOk, outputsInSafeState, canRxCount, canTxCount, canTxFail, config.canMode, lastCanRxMs,
         config.canSpeedKbps, config.txBaseId, config.rxBaseId, config.txRateHz, config.rxTimeoutMs,
-        config.inputPullupMask, getDiDebounceMs(), FW_VERSION, adcScanFailCount, now
+        config.inputPullupMask, getAnalogPullupMask(), getDiDebounceMs(), FW_VERSION,
+        outputVoltageMv, outputVoltageReady, adcScanFailCount, now
       };
       sendJsonTelemetry(state);
     } else {

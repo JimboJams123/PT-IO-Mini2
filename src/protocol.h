@@ -8,9 +8,9 @@ constexpr uint8_t PROTOCOL_VERSION = 1;
 
 // JSON document sizes (bytes)
 constexpr size_t JSON_CMD_DOC_SIZE = 512;
-constexpr size_t JSON_TELEMETRY_DOC_SIZE = 1024;
-constexpr size_t JSON_RESPONSE_DOC_SIZE = 256;
-constexpr size_t JSON_HELLO_DOC_SIZE = 384;
+constexpr size_t JSON_TELEMETRY_DOC_SIZE = 1280;
+constexpr size_t JSON_RESPONSE_DOC_SIZE = 320;
+constexpr size_t JSON_HELLO_DOC_SIZE = 512;
 
 // Telemetry format
 enum TelemetryFormat : uint8_t {
@@ -71,8 +71,13 @@ struct DeviceState {
   uint16_t txRateHz;
   uint16_t rxTimeoutMs;
   uint8_t inputPullupMask;
+  uint8_t analogPullupMask;
   uint8_t diDebounceMs;
   uint8_t fwVersion;
+  
+  // Output voltage sense (DPO1-4, ADS1115, millivolts; valid only if outputVoltageReady)
+  const uint16_t* outputVoltageMv;
+  bool outputVoltageReady;
   
   // Diagnostics
   uint32_t adcScanFailCount;
