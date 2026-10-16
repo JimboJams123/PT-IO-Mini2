@@ -1236,6 +1236,7 @@ static constexpr uint32_t EMTRON_BASE_ID = 0x2C1U;
 // only has 4 outputs, so it simply never sees/needs the second frame; the
 // unused outputDuty[4..7] slots are already ignored there (NUM_DIGITAL_OUT).
 static bool emtronDecodeDutyFrame(const CanMsg &msg,
+                                  const uint16_t configOutFreqHz[4],
                                   uint16_t defaultPwmFreqHz,
                                   uint8_t channelStart,
                                   uint16_t outputFreq[8],
@@ -1251,7 +1252,15 @@ static bool emtronDecodeDutyFrame(const CanMsg &msg,
     }
     uint8_t ch = static_cast<uint8_t>(channelStart + i);
     outputDuty[ch] = mapDuty1000To255(dutyRaw1000);
-    if (outputFreq[ch] == 0U) {
+    if (channelStart == 0U) {
+      // Primary device (DPO1-4): the Custom Tx Data Set has no frequency
+      // field at all, so always drive from the app-configured, persisted
+      // frequency (config.outFreqHz) - set it once in the app, then only
+      // duty is live-controlled from the ECU.
+      outputFreq[ch] = configOutFreqHz[i];
+    } else if (outputFreq[ch] == 0U) {
+      // Secondary EIC10 "second device" slot (DPO5-8, Mini2 only) has no
+      // persisted per-channel frequency; fall back to the firmware default.
       outputFreq[ch] = defaultPwmFreqHz;
     }
   }
@@ -1260,14 +1269,15 @@ static bool emtronDecodeDutyFrame(const CanMsg &msg,
 
 static bool emtronHandleRx(const CanMsg &msg,
                            uint16_t rxBaseId,
+                           const uint16_t configOutFreqHz[4],
                            uint16_t defaultPwmFreqHz,
                            uint16_t outputFreq[8],
                            uint8_t outputDuty[8]) {
   if (msg.id == rxBaseId) {
-    return emtronDecodeDutyFrame(msg, defaultPwmFreqHz, 0U, outputFreq, outputDuty);
+    return emtronDecodeDutyFrame(msg, configOutFreqHz, defaultPwmFreqHz, 0U, outputFreq, outputDuty);
   }
   if (msg.id == rxBaseId + 1U) {
-    return emtronDecodeDutyFrame(msg, defaultPwmFreqHz, 4U, outputFreq, outputDuty);
+    return emtronDecodeDutyFrame(msg, configOutFreqHz, defaultPwmFreqHz, 4U, outputFreq, outputDuty);
   }
   return false;
 }
@@ -1324,6 +1334,7 @@ bool canModeHandleRx(uint8_t mode,
                      const CanMsg &msg,
                      uint16_t rxBaseId,
                      uint16_t defaultPwmFreqHz,
+                     const uint16_t configOutFreqHz[4],
                      uint16_t outputFreq[8],
                      uint8_t outputDuty[8],
                      uint8_t &safeMask,
@@ -1400,7 +1411,7 @@ bool canModeHandleRx(uint8_t mode,
       (void)inputPullupMask;
       maskChanged = false;
       pullupChanged = false;
-      return emtronHandleRx(msg, rxBaseId, defaultPwmFreqHz, outputFreq, outputDuty);
+      return emtronHandleRx(msg, rxBaseId, configOutFreqHz, defaultPwmFreqHz, outputFreq, outputDuty);
 
     case CAN_MODE_RESERVED_9:
     case CAN_MODE_RESERVED_10:

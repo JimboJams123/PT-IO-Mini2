@@ -1136,6 +1136,7 @@ static void handleCanRx(const CanMsg &msg) {
                                  msg,
                                  config.rxBaseId,
                                  DEFAULT_PWM_FREQ_HZ,
+                                 config.outFreqHz,
                                  outputFreq,
                                  outputDuty,
                                  config.safeMask,
