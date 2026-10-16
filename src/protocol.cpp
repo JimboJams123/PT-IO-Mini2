@@ -35,6 +35,7 @@ void sendJsonHello(uint8_t fwVersion, uint8_t canMode) {
   doc["type"] = "hello";
   doc["version"] = PROTOCOL_VERSION;
   doc["fw"] = fwVersion;
+  doc["board"] = "PT-IO-Mini2";
   doc["canMode"] = canMode;
   doc["canModeName"] = canModeName(canMode);
   
