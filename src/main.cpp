@@ -727,6 +727,9 @@ static uint16_t computeCrc(const Config &cfg) {
 // exist in its protocol - so those three must default to app-controlled.
 // Duty stays CAN-controlled by default even for Emtron, since driving duty
 // from the ECU is the entire point of that mode.
+// Also seeds the default CAN TX rate per mode - Haltech IO12A&B (mode 3)
+// needs a faster 20Hz default since it combines two IO12 buses' worth of
+// status traffic onto one set of frames.
 void applyOverrideDefaultsForMode(Config &cfg) {
   if (cfg.canMode == CAN_MODE_EMTRON) {
     cfg.dutyOverrideMask = 0x00;
@@ -739,6 +742,7 @@ void applyOverrideDefaultsForMode(Config &cfg) {
     cfg.safeOverrideMask = 0x00;
     cfg.activeOverrideMask = 0x00;
   }
+  cfg.txRateHz = (cfg.canMode == CAN_MODE_HALTECH_IO12AB) ? 20 : DEFAULT_TX_RATE_HZ;
 }
 
 void setDefaults(Config &cfg) {
