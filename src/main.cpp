@@ -1368,6 +1368,14 @@ static void sendTxFrames() {
     packFreqDuty(4, config.txBaseId + 5);
     packFreqDuty(6, config.txBaseId + 6);
 
+    if (config.canMode == CAN_MODE_EMTRON) {
+      uint16_t outputVoltageMv[OUTPUT_SENSE_COUNT];
+      bool outputVoltageReady;
+      snapshotOutputVoltageMv(outputVoltageMv, outputVoltageReady);
+      emtronBuildTxOutputVoltageFrame(config.txBaseId, outputVoltageMv, frame);
+      sendCanFrame(frame.id, frame.data, frame.len);
+    }
+
     Mode0Status modeStatus;
     modeStatus.canInitOk = canInitOk;
     modeStatus.outputsInSafeState = outputsInSafeState;

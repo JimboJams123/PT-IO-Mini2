@@ -84,6 +84,12 @@ void mode0BuildTxDiPairFrame(uint32_t baseId,
                                const uint16_t outputVoltageMv[4],
                                ModeTxFrame &frame);
 
+// Emtron EIC16M AN Voltage 9-12 frame (base+2), literal 0.001V/count LE uint16 -
+// matches the format EIC16M itself uses, unlike mode0's own PT-scaled frame.
+void emtronBuildTxOutputVoltageFrame(uint16_t txBaseId,
+                                     const uint16_t outputVoltageMv[4],
+                                     ModeTxFrame &frame);
+
 void mode0BuildTxStatusFrame(uint16_t txBaseId,
                              const Mode0Status &status,
                              ModeTxFrame &frame);

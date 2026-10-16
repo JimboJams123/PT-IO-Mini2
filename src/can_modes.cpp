@@ -1204,9 +1204,12 @@ static void motecE888BuildTxDiagFrame(uint8_t digitalInMask,
 // Protocol: https://docs.emtronaustralia.com.au/accessories/input-expander/index.html
 // Base ID default 705/0x2C1; transmit-only (no RX side to decode), 8-byte LE frames:
 //   base+0: AN Voltage 1-4, base+1: AN Voltage 5-8 (0.001 V/count, 0.0-5.0 V)
+//   base+2: AN Voltage 9-12 (0.001 V/count) - DTM2's DPO1-4 output voltage sense
+//           (0-30V); sent as literal millivolts, same encoding as 1-8. Mini2 has
+//           no hardware for these channels, so the frame carries all zeros there.
 //   base+4: Frequency 1-4  (0.1 Hz/count)
-// AN Voltage 9-16 (base+2/+3) are intentionally not sent: neither Mini2 nor
-// DTM2 has more than 8 analog inputs.
+// AN Voltage 13-16 (base+3) are intentionally not sent: no board in this family
+// has a 13th-16th analog input.
 // Outputs have no home in the EIC16M/EIC10 spec either (input-only devices),
 // so output control instead rides on EMtune's "Custom Tx Data Set" feature
 // (4x "User Duty Cycle" params), the same approach PT Motorsport already
@@ -1285,6 +1288,19 @@ static void emtronBuildTxAnalogFrames(uint16_t txBaseId,
     uint16_t mv = scaleAnalog14ToMv5000(analogRaw14[i + 4]);
     frame1.data[i * 2] = static_cast<uint8_t>(mv & 0xFF);
     frame1.data[i * 2 + 1] = static_cast<uint8_t>((mv >> 8) & 0xFF);
+  }
+}
+
+void emtronBuildTxOutputVoltageFrame(uint16_t txBaseId,
+                                     const uint16_t outputVoltageMv[4],
+                                     ModeTxFrame &frame) {
+  frame.id = txBaseId + 2U;
+  frame.len = 8;
+  memset(frame.data, 0, sizeof(frame.data));
+  for (uint8_t i = 0; i < 4U; i++) {
+    uint16_t mv = outputVoltageMv[i];
+    frame.data[i * 2U] = static_cast<uint8_t>(mv & 0xFFU);
+    frame.data[i * 2U + 1U] = static_cast<uint8_t>((mv >> 8) & 0xFFU);
   }
 }
 
