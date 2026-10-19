@@ -934,8 +934,7 @@ static bool haltechIo12HandleRx(uint8_t mode,
       }
 
       bool safeOn = (flags & 0x10U) != 0;
-      bool activeStateRaw = (flags & 0x20U) != 0; // IO12: true means active LOW
-      bool activeHigh = !activeStateRaw;
+      bool activeHigh = (flags & 0x20U) != 0; // bit set = active high (requires external pull-up)
 
       uint8_t bitMask = static_cast<uint8_t>(1U << channel);
       uint8_t newSafe = static_cast<uint8_t>((safeMask & ~bitMask) | (safeOn ? bitMask : 0U));
