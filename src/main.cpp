@@ -822,7 +822,7 @@ void applyOutputs(bool useSafeState) {
       duty = safeOn ? 255 : 0;
     }
     bool activeHigh = (config.activeMask >> i) & 0x01;
-    if (!activeHigh) duty = 255 - duty;
+    if (activeHigh) duty = 255 - duty;
     bool stageInverted = ((OUTPUT_STAGE_INVERT_MASK >> i) & 0x01U) != 0U;
     if (stageInverted) duty = 255 - duty;
     newDuty[i] = duty;
