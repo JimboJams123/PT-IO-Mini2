@@ -185,7 +185,7 @@ const float OUTPUT_SENSE_DIVIDER_RATIO = 6.0f;
 // Additional hardware polarity stage (e.g. external MOSFET inverter).
 // Bit=1 means invert the post-activeMask duty before writing to the pin.
 // Set to 0xFF to invert all outputs, or set bits per-channel as needed.
-const uint8_t OUTPUT_STAGE_INVERT_MASK = 0x00;
+const uint8_t OUTPUT_STAGE_INVERT_MASK = 0xFF;
 
 // Digital input duty polarity.
 // Bit=1 means DI duty is reported as low-time (active LOW).
@@ -1043,7 +1043,7 @@ void applyOutputs(bool useSafeState) {
       duty = safeOn ? 255 : 0;
     }
     bool activeHigh = (config.activeMask >> i) & 0x01;
-    if (!activeHigh) duty = 255 - duty;
+    if (activeHigh) duty = 255 - duty;
     bool stageInverted = ((OUTPUT_STAGE_INVERT_MASK >> i) & 0x01U) != 0U;
     if (stageInverted) duty = 255 - duty;
     newDuty[i] = duty;
