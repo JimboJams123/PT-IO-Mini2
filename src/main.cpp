@@ -758,7 +758,7 @@ void setDefaults(Config &cfg) {
   cfg.outFreqHz[2] = DEFAULT_PWM_FREQ_HZ;
   cfg.outFreqHz[3] = DEFAULT_PWM_FREQ_HZ;
   cfg.safeMask = 0x00;   // all outputs safe OFF
-  cfg.activeMask = 0x0F; // DTM2 outputs are active HIGH by default
+  cfg.activeMask = 0x00; // DTM2 outputs are active LOW by default (native low-side drive, no pull-up needed)
   cfg.canMode = 0;
   cfg.inputPullupMask = 0x00; // all DI pull-ups OFF by default
   memset(cfg.reserved, 0, sizeof(cfg.reserved));
@@ -1043,7 +1043,7 @@ void applyOutputs(bool useSafeState) {
       duty = safeOn ? 255 : 0;
     }
     bool activeHigh = (config.activeMask >> i) & 0x01;
-    if (!activeHigh) duty = 255 - duty;
+    if (activeHigh) duty = 255 - duty;
     bool stageInverted = ((OUTPUT_STAGE_INVERT_MASK >> i) & 0x01U) != 0U;
     if (stageInverted) duty = 255 - duty;
     newDuty[i] = duty;
