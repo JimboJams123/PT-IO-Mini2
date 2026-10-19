@@ -287,8 +287,7 @@ JsonCmdResult handleJsonCommand(const String& jsonLine,
     }
     
     outputDuty[ch - 1] = static_cast<uint8_t>((duty * 255 + 50) / 100);
-    // Set this channel's override bit (enable app control, lock out CAN)
-    config.dutyOverrideMask |= (1 << (ch - 1));
+    // Does NOT touch dutyOverrideMask - locking is a separate, explicit setOverride action.
     configChanged = true;
     outputsChanged = true;
     
@@ -309,7 +308,7 @@ JsonCmdResult handleJsonCommand(const String& jsonLine,
     
     config.outFreqHz[ch - 1] = freq;
     outputFreq[ch - 1] = freq;
-    config.freqOverrideMask |= (1 << (ch - 1));
+    // Does NOT touch freqOverrideMask - locking is a separate, explicit setOverride action.
     configChanged = true;
     outputsChanged = true;
     
@@ -328,7 +327,7 @@ JsonCmdResult handleJsonCommand(const String& jsonLine,
     uint8_t mask = 1 << (ch - 1);
     safeMask = (safeMask & ~mask) | (val ? mask : 0);
     config.safeMask = safeMask;
-    config.safeOverrideMask |= mask;
+    // Does NOT touch safeOverrideMask - locking is a separate, explicit setOverride action.
     configChanged = true;
     outputsChanged = true;
     
@@ -347,7 +346,7 @@ JsonCmdResult handleJsonCommand(const String& jsonLine,
     uint8_t mask = 1 << (ch - 1);
     activeMask = (activeMask & ~mask) | (activeHigh ? mask : 0);
     config.activeMask = activeMask;
-    config.activeOverrideMask |= mask;
+    // Does NOT touch activeOverrideMask - locking is a separate, explicit setOverride action.
     configChanged = true;
     outputsChanged = true;
     
