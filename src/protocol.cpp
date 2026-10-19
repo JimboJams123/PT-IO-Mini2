@@ -133,8 +133,18 @@ void sendJsonTelemetry(const DeviceState& state) {
   for (uint8_t i = 0; i < state.numDigitalOut; i++) {
     JsonObject out = outputs.createNestedObject();
     
-    // Duty as percentage
-    float dutyPct = (static_cast<float>(state.outputDuty[i]) / 255.0f) * 100.0f;
+    // Duty as percentage. Report what is actually being applied to the pin right
+    // now, not just the stored command - while Safe State is active, applyOutputs()
+    // forces non-duty-locked channels to their Safe level without touching
+    // outputDuty[], so mirror that same substitution here or telemetry would keep
+    // showing the pre-safe-state value even though the output physically changed.
+    uint8_t appliedDuty = state.outputDuty[i];
+    bool dutyIsOverridden = (state.dutyOverrideMask & (1 << i)) != 0;
+    if (state.outputsInSafeState && !dutyIsOverridden) {
+      bool safeOn = (state.safeMask & (1 << i)) != 0;
+      appliedDuty = safeOn ? 255 : 0;
+    }
+    float dutyPct = (static_cast<float>(appliedDuty) / 255.0f) * 100.0f;
     out["duty"] = serialized(String(dutyPct, 1));
     
     // Frequency (Hz)
