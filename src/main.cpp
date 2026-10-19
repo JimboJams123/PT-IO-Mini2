@@ -163,7 +163,11 @@ const uint8_t FW_VERSION = 0x09;
 // Additional hardware polarity stage (e.g. external MOSFET inverter).
 // Bit=1 means invert the post-activeMask duty before writing to the pin.
 // Set to 0xFF to invert all outputs, or set bits per-channel as needed.
-const uint8_t OUTPUT_STAGE_INVERT_MASK = 0x00;
+// Confirmed by bench test needed on all 8 channels: the GPT timer/output
+// stage on this board drives the opposite physical state to what the
+// activeMask-adjusted duty alone would imply (newDuty=255 -> physically
+// off, newDuty=0 -> physically on), independent of Active High/Low.
+const uint8_t OUTPUT_STAGE_INVERT_MASK = 0xFF;
 
 // Digital input duty polarity.
 // Bit=1 means DI duty is reported as low-time (active LOW).
