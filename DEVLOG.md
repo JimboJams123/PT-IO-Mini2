@@ -38,6 +38,42 @@ Rev 2 PCB will use the bare RA4M1 chip — see `PINOUT.md` for the new pinout.
 
 ## Version History
 
+### v0.1.0 (October 2026)
+**Haltech IO12 Polarity Fixes + Per-Parameter Overrides**
+
+- Fixed Haltech IO12 CAN decode: Active State bit (byte1 bit5) was read
+  inverted, causing commanded-on channels to drive 0 physical duty and vice
+  versa. Confirmed against the official Haltech IO12 CAN spec and a real
+  Haltech ECU bench test.
+- Fixed `applyOutputs()` active-polarity handling: the activeHigh inversion
+  direction was backwards, and this board's GPT-timer PWM output stage has
+  its own unconditional hardware-level duty inversion (not present on the
+  original AVR+MCP2515 board) that was never being compensated for. Enabled
+  `OUTPUT_STAGE_INVERT_MASK` for all channels and corrected the inversion
+  condition so Active LOW/HIGH now behaves exactly as it did on the original
+  reference firmware. Confirmed on the bench against a real Haltech ECU
+  (duty, frequency, safe state, and active polarity all verified correct in
+  all three IO12 modes).
+- Added per-parameter (duty/frequency/safe-state/active-polarity) app-vs-CAN
+  override toggles — any output channel can now have individual parameters
+  locked to app control while others remain CAN-controlled, instead of a
+  single all-or-nothing override. Ported to Mini2's 8-channel, paired-timer
+  output layout.
+- Removed auto-lock-on-write: editing Hz/%/Safe/Active from the app no longer
+  silently sets the override/lock bit; locking now only happens via an
+  explicit setOverride command.
+- Default CAN TX rate for Haltech IO12A/IO12B (mode 3) changed to 20 Hz.
+- Telemetry now reports the actual safe-state-applied duty instead of the
+  stale pre-safe-state commanded duty.
+- Emtron mode: use the fixed EIC16M base ID (705/0x2C1) for the primary
+  device and ignore `config.txBaseId`; use the app-configured, persisted
+  output frequency (`config.outFreqHz`) for all DPOs instead of a hardcoded
+  default, respecting the paired-timer layout.
+- Added board identification field to the hello message, and build output is
+  now named after board+firmware version instead of generic `firmware.bin`.
+- Fixed `.gitignore`: concatenated entries and missing `releases/` ignore.
+- Firmware version bumped to `v0.1.0` (`FW_VERSION = 0x0A`).
+
 ### v0.0.9 (October 2026)
 **Real Emtron EIC16M CAN Mode (Mode 8), with EIC10 overflow device**
 
