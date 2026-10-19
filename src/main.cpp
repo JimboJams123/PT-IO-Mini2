@@ -163,7 +163,7 @@ const uint16_t DEFAULT_RX_BASE_ID = 0x640;
 const uint16_t DEFAULT_RX_TIMEOUT_MS = 2000;
 const uint16_t DEFAULT_PWM_FREQ_HZ = 300;
 const uint8_t DEFAULT_DI_DEBOUNCE_MS = 20;
-const uint8_t FW_VERSION = 0x09;
+const uint8_t FW_VERSION = 0x0A;
 
 const uint8_t AUX_SWITCH_ANALOG_PULLUP_1 = 1U << 0;
 const uint8_t AUX_SWITCH_ANALOG_PULLUP_2 = 1U << 1;
